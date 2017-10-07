@@ -1,0 +1,48 @@
+SELECT
+
+Trip_signup.Day,
+Trip_signup.city_name,
+(Trip_signup.Signups / Trip_Finished.Signups_finished) * 100 AS  Percentage 
+
+FROM
+(
+SELECT
+DATE_TRUNC('day',e._ts ) AS Day,--or use cast(timestam as date)
+c.city_name,
+COUNT (e.rider_id) AS Signups
+
+
+FROM trips t
+JOIN cities c ON t.city_id = c.city_id
+LEFT JOIN events e ON t.client_id = e.rider_id
+
+WHERE c.city_name IN ('Qarth','Meereen')
+AND e.event_name = 'sign_up_success'
+AND e._ts::timestamp AT TIME ZONE 'UTC' BETWEEN '2016-01-01 00:00:00 ' AND '2016-01-07 23:59:59'
+
+GROUP BY 2
+ORDER BY Day ASC, c.city_name ASC
+
+)AS Trip_signup
+
+LEFT JOIN 
+
+(
+--How many signups who complete at least one trip
+DATE_TRUNC('day',e._ts ) AS Day,--or use cast(timestam as date)
+c.city_name,
+COUNT (t.client_id) AS Signups_finished
+
+WHERE c.city_name IN ('Qarth','Meereen')
+AND t.status='completed'
+AND DATE_PART('day',t.request_at - e._ts) * 24 + DATE_PART('hour', t.request_at - e._ts) < 160
+--Clients also are people who signup in the first week of 2016
+AND e.event_name = 'sign_up_success'
+AND e._ts::timestamp AT TIME ZONE 'UTC' BETWEEN '2016-01-01 00:00:00 ' AND '2016-01-07 23:59:59'
+
+GROUP BY 2
+ORDER BY Day ASC, c.city_name ASC
+) AS Trip_Finished
+
+ON Trip_signup.Day = Trip_Finished.Day AND Trip_signup.city_name = Trip_Finished.city_name
+
