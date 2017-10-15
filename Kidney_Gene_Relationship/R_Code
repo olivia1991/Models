@@ -1,0 +1,256 @@
+# Models
+Projects 
+kidney = read.csv('Kidney.csv', head = TRUE)
+View(kidney)
+
+#Transpose the dataset Kidney
+
+kidney = t(kidney)
+colnames(kidney) = as.matrix(kidney[1,])
+kidney = kidney[-1,]
+
+#translate dataset into datafram
+kidney = data.frame(kidney) 
+
+#Turn factor variable into numeric
+for (i in 1:24){
+  kidney[,i]  = as.numeric(levels(kidney[,i]))[kidney[,i]]
+  
+}
+## 24 Gene.Name, 40 Oberservations
+## Do the variable selection  ---- Best Subset Selection
+
+library(leaps)
+regfit = regsubsets(Mapk1~ ., data = kidney, nvmax = 23) # set max subset's size is 23
+reg.summary = summary(regfit)
+
+#Find the largest adjusted R-squred
+which.max(reg.summary$adjr2)  # means model can explain the most part of samples
+
+#Find smallest AIC/BIC/Cp
+summary(reg.summary)
+which.min(reg.summary$bic)
+which.min(reg.summary$cp)
+
+#Plot adjusted R-squred and BIC
+par(mfrow = c(1,3))
+
+#ADJ-R^2
+plot(reg.summary$adjr2, xlab = 'Number of Variable', ylab = 'Adjusted R-Squred',
+     main = 'ADJ_R^2 -- Best Subset Selection', lwd = 3, type = 'l')
+points(12, reg.summary$adjr2[12],col = 'red', cex = 2, pch = 20)
+
+# BIC
+plot(reg.summary$bic, xlab = 'Number of Variable', ylab = 'BIC', type = 'l',
+     main = 'BIC -- Best Subset Selection', lwd = 3)
+points(4, reg.summary$bic[4], col = 'red', cex = 3, pch =20)
+
+#Cp
+plot(reg.summary$cp, xlab = 'Number of Variable', ylab = 'Cp', type = 'l',
+     main = 'Cp of Best Subsetion', lwd = 3)
+points(5, reg.summary$cp[5], col = 'Red', cex = 3, pch =20)
+
+###BIC choose the Akt2, Rik, Pil3r3,  Rac1
+
+
+## 80% training set'; 20% test-set
+
+par(mfrow = c(1,1))
+library(glmnet)
+library(caTools)
+grid = 10^seq(10,-2, length = 100)
+
+#Ridge Regression
+mse.ridge = rep(NA, 100)
+bestlam = rep(NA,100)
+
+for (i in 1:100){
+
+    set.seed(i)
+    spl = sample.split(kidney$Map2k1, SplitRatio = 0.8)
+    
+    train = subset(kidney, spl == TRUE)
+    test = subset(kidney, spl == FALSE)
+    
+    x.train = model.matrix(Mapk1~., train)[,-1]
+    y.train = train$Mapk1
+    
+    x.test = model.matrix(Mapk1~., test)[,-1]
+    y.test = test$Mapk1
+    
+    ridge.mod = glmnet(x.train, y.train, alpha = 0, lambda = grid)  #### give 100 lambda
+    
+    #Use Cross Validation to choose the tuning parameter
+    cv.out = cv.glmnet(x.train, y.train, alpha = 0) #lambda = 1 --lasso
+    bestlam[i] =  cv.out$lambda.min
+    
+    #Combine model + lambda(Tuning parameter)
+    ridge.pred = predict(ridge.mod, s = bestlam[i], newx = x.test)
+    mse.ridge[i] = mean((y.test-ridge.pred)^2)
+}
+
+
+###Lasso
+mse.lasso = rep(NA, 100)
+bestlam.lasso = rep(NA,100)
+
+for (i in 1:100){
+  
+  set.seed(i)
+  spl = sample.split(kidney$Map2k1, SplitRatio = 0.8)
+  
+  train = subset(kidney, spl == TRUE)
+  test = subset(kidney, spl == FALSE)
+  
+  x.train = model.matrix(Mapk1~., train)[,-1]
+  y.train = train$Mapk1
+  
+  x.test = model.matrix(Mapk1~., test)[,-1]
+  y.test = test$Mapk1
+  
+  lasso.mod = glmnet(x.train, y.train, alpha = 1, lambda = grid)  #### give 100 lambda
+  
+  #Use Cross Validation to choose the tuning parameter
+  cv.out.lasso = cv.glmnet(x.train, y.train, alpha = 1) #lambda = 1 --lasso
+  bestlam.lasso[i] =  cv.out.lasso$lambda.min
+  
+  #Combine model + lambda(Tuning parameter)
+  lasso.pred = predict(lasso.mod, s = bestlam.lasso[i], newx = x.test)
+  mse.lasso[i] = mean((y.test-lasso.pred)^2)
+}
+
+
+##Two Boxplot
+par(mfrow = c(1,2))
+boxplot(mse.ridge, ylim = c(0,0.04), main='Test MSE For Ridge')
+boxplot(mse.lasso, ylim = c(0,0.04), main = 'Test MSE For Lasso')
+
+
+#check the MSE of Lasso VS Ridge
+c('MSE.Lasso' = min(mse.lasso), 'MSE.ridge' = min(mse.ridge))
+
+
+#Lasso has better performance than ridge-> refit ridge model on full dataset, using
+#the value of lambda chosen by croo-validation, and examine then coefficient estimates
+
+bestlambda = bestlam[which.min(mse.ridge)]
+out = glmnet(model.matrix(Mapk1~. , kidney), kidney$Mapk1, alpha = 0)
+predict(out, type = 'coefficients', s = bestlambda)[1:25,]
+
+
+#Lasso Regression Model -- Akt2, Plcg2, Rik,Pik3d, Pik3r3, Racl, Nfat5
+bestlambda.lasso = bestlam.lasso[which.min(mse.lasso)]
+out = glmnet(model.matrix(Mapk1~. , kidney), kidney$Mapk1, alpha =1)
+coef.lasso = predict(out, type = 'coefficients', s = bestlambda.lasso )
+coef.lasso[coef.lasso != 0]
+
+
+### Tree 
+library(MASS)
+library(tree)
+
+set.seed(1)
+spl.tree = sample.split(kidney$Mapk1, SplitRatio = 0.8)
+train.tree = subset(kidney, spl == TRUE)
+test.tree = subset(kidney, spl == FALSE)
+
+#train.tree = sample(1:nrow(kidney), nrow(kidney)/2)
+
+tree.kidney = tree(Mapk1~., data = train.tree)
+summary(tree.kidney)
+#"Pik3r3" "Pla2g6" "Sphk2"  "Rac1" 
+par(mfrow = (c(1,1)))
+plot(tree.kidney)
+text(tree.kidney, pretty = 0)  # pretty = 0--> a factor split attributes are used unchanged
+#Higher value of Pik3r3 with lower value of Sphk2 can lead to higher values of Mapk1
+
+#Tree --  Test data
+yhat = predict(tree.kidney, newdata = test.tree)
+mean((yhat-test.tree$Mapk1)^2)
+
+##Apply "Bagging" / 'RF' to check whether can attain higher accuracy
+
+#Bagging
+library(randomForest)
+
+set.seed(1)
+spl.bag = sample.split(kidney$Mapk1, SplitRatio = 0.8)
+train.bag = subset(kidney, spl.bag == TRUE)
+test.bag = subset(kidney, spl.bag == FALSE)
+
+bag.kidney = randomForest(Mapk1~., data = train.bag, mtry = 23, importance = TRUE)
+yhat.bag = predict(bag.kidney, newdata = test.bag)
+mean((yhat.bag-test.bag$Mapk1)^2)
+
+
+#Random Forest
+set.seed(1)
+spl.rf = sample.split(kidney$Mapk1, SplitRatio = 0.8)
+
+train.rf = subset(kidney, spl.rf == TRUE)
+test.rf = subset(kidney, spl.rf == FALSE)
+rf.kidney = randomForest(Mapk1~., data = train.rf, mtry =7, importance =TRUE)
+yhat.rf = predict(rf.kidney, newdata = test.rf)
+mean((yhat.rf - test.rf$Mapk1)^2)
+
+
+varImpPlot(bag.kidney) #bagging -- Pik3r3, Rac1, Rik, Cdc42,Nfat5
+varImpPlot(rf.kidney) # RF. Pik3r3, Rik, Pik3cd, Racl, Cdc42
+
+
+#Simple Tree Performance
+mse.simpletree = rep(NA,100)
+for (i in 1:100){
+  set.seed(i)
+  spl.tree1 = sample.split(kidney$Mapk1, SplitRatio = 0.8)
+  train.tree1 = subset(kidney, spl.tree1 == TRUE)
+  test.tree1 = subset(kidney, spl.tree1 == FALSE)
+  tree.kidney1 = tree(Mapk1~., data = train.tree1)
+  mse.simpletree[i] = mean((yhat-test.tree1$Mapk1)^2)
+}
+
+
+#Bagging
+
+mse.bagging = rep(NA, 100)
+for (i in 1:100){
+  
+  set.seed(i)
+  spl.bag1 = sample.split(kidney$Mapk1, SplitRatio = 0.8)
+  train.bag1 = subset(kidney, spl.bag1 == TRUE)
+  test.bag1 = subset(kidney, spl.bag1 == FALSE)
+  
+  bag.kidney1 = randomForest(Mapk1~., data = train.bag1, mtry = 23, importance = TRUE)
+  yhat.bag1 = predict(bag.kidney1, newdata = test.bag1)
+  mse.bagging[i] = mean((yhat.bag1-test.bag1$Mapk1)^2)
+}
+
+
+#Randome Forest
+
+mse.rf = rep(NA,100)
+for (i in 1:100){
+  
+  set.seed(i)
+  spl.rf1 = sample.split(kidney$Mapk1, SplitRatio = 0.8)
+  train.rf1 = subset(kidney, spl.rf1 == TRUE)
+  test.rf1 = subset(kidney,spl.rf1 == FALSE)
+  rf.kidney1 = randomForest(Mapk1~., data = train.rf1, mtry = 7, importance = TRUE)
+  yhat.rf1 = predict(rf.kidney1, newdata = test.rf1)
+  mse.rf[i] = mean((yhat.rf1 - test.rf1$Mapk1)^2)
+  
+}
+
+
+par(mfrow = c(1,3))
+boxplot(mse.simpletree, main = 'Test MSE of Tree')
+# normalize the y_axis
+boxplot(mse.bagging, main = 'Test MSE of Bagging', ylim = c(0, 0.06))
+boxplot(mse.rf, main = 'Test MSE of RandomForest', ylim = c(0, 0.06))
+
+
+
+
+
+
+
